@@ -4,6 +4,7 @@ version = "0.0.1"
 authors = [{ name = "aytekin.fatihm@gmail.com" }]
 requires-python = ">=3.10,<3.13"
 dependencies = [
+    "pyyaml>=6.0",
     # Any dependencies for jobs and pipelines in this project can be added here
     # See also https://docs.databricks.com/dev-tools/bundles/library-dependencies
     #
