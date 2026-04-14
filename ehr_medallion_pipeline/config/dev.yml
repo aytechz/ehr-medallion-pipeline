@@ -1,0 +1,23 @@
+catalog: "ehr_pipeline"
+
+synthea:
+  base_path: "dbfs:/databricks-datasets/rwe/ehr/csv/"
+  source_prefix: "synthea"
+  tables:
+    - allergies
+    - careplans
+    - conditions
+    - encounters
+    - imaging_studies
+    - immunizations
+    - medications
+    - observations
+    - organizations
+    - patients
+    - procedures
+    - providers
+
+healthverity:
+  source_table: "samples.healthverity.claims_sample_synthetic"
+  source_prefix: "hv"
+  target_schema: "bronze"
