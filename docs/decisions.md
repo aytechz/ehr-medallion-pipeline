@@ -31,3 +31,6 @@ test/     → tests only
 Building both PySpark notebooks (for learning) and DLT (for showcase).
 Learn with notebooks first, graduate to DLT.
 
+## Repo structure
+Bundle lives inside repo subfolder due to bundle init order.
+Would flatten to repo root in a greenfield project.
