@@ -21,3 +21,4 @@ healthverity:
   source_table: "samples.healthverity.claims_sample_synthetic"
   source_prefix: "hv"
   target_schema: "bronze"
+  target_table: "claims_raw"
