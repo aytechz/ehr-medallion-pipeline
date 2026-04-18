@@ -34,3 +34,31 @@ Learn with notebooks first, graduate to DLT.
 ## Repo structure
 Bundle lives inside repo subfolder due to bundle init order.
 Would flatten to repo root in a greenfield project.
+
+## Progress log
+
+### Bronze layer (complete)
+- 12 Synthea CSV tables ingested into ehr_pipeline.bronze
+- HealthVerity claims ingested into ehr_pipeline.bronze.hv_claims_raw (409,825 rows)
+- Config-driven ingestion via load_config() + dev.yml
+- Audit columns: _ingested_at, _source_file on every row
+- Append mode — full history preserved
+
+### Silver layer (in progress)
+- transform_patients: 11,737 rows
+  - PII dropped (ssn, drivers, passport)
+  - Dates cast, patient_age derived, is_deceased flag
+  - Marital status decoded
+  - Deduplication via window function
+- transform_encounters: 393,234 rows
+  - Timestamps cast, duration_minutes derived
+  - patient_id/provider_id renamed
+  - Partitioned by encounter_year/encounter_month
+  - Deduplication via window function
+
+### Pending
+- Silver: conditions, medications, observations, procedures
+- Gold layer
+- Schema drift detection
+- Dashboard
+- AI agent
