@@ -32,6 +32,11 @@ def transform_patients(spark, env: str = "dev"):
 
     # cast date columns
     df = df.withColumn("birthdate", F.col("birthdate").cast("date"))
+    # before casting, replace "-" with null
+    df = df.withColumn("deathdate", 
+        F.when(F.col("deathdate") == "-", None)
+        .otherwise(F.col("deathdate"))
+    )
     df = df.withColumn("deathdate", F.col("deathdate").cast("date"))
 
     # derive age and deceased flag
