@@ -62,3 +62,11 @@ Would flatten to repo root in a greenfield project.
 - Schema drift detection
 - Dashboard
 - AI agent
+
+### Silver layer (complete — Synthea)
+- transform_patients:     11,737 rows
+- transform_encounters:   393,234 rows  
+- transform_conditions:   84,421 rows
+- transform_medications:  109,121 rows
+- transform_observations: 2,181,850 rows
+- transform_procedures:   327,171 rows
