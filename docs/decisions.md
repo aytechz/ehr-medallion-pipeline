@@ -70,3 +70,21 @@ Would flatten to repo root in a greenfield project.
 - transform_medications:  109,121 rows
 - transform_observations: 2,181,850 rows
 - transform_procedures:   327,171 rows
+
+## Silver layer scope
+Phase 1 (complete): patients, encounters, conditions, 
+                    medications, observations, procedures
+Phase 2 (future):   allergies, immunizations, 
+                    careplans, imaging_studies
+
+organizations and providers added as dimension tables 
+needed for Gold provider metrics.
+
+## Incremental processing
+Current implementation uses full load — reads entire 
+source on every run. 
+
+Production improvement: implement watermark pattern
+using pipeline_control table to track last successful
+run per table. Only process records with 
+_ingested_at > last_watermark.
