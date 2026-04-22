@@ -88,3 +88,15 @@ Production improvement: implement watermark pattern
 using pipeline_control table to track last successful
 run per table. Only process records with 
 _ingested_at > last_watermark.
+
+### Silver HealthVerity enrichments (Issue #21)
+- diagnosis_category via broadcast join on ICD-10 first character
+  - Broadcast join chosen over F.when() chain — Spark sends
+    25-row lookup to all executors, no shuffle
+  - Left join to preserve rows with null diagnosis_code
+- cost_reduction: line_charge - line_allowed
+- claim_type_decoded: P → Professional, I → Institutional
+- is_valid_npi: regex validation (^\\d{10}$), not just length check
+- icd10_letter retained for Gold layer filtering
+- DecimalType(10,2) used for monetary columns — not float/double
+  to avoid floating-point precision drift in aggregations
