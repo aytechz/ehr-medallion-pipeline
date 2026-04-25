@@ -100,3 +100,35 @@ _ingested_at > last_watermark.
 - icd10_letter retained for Gold layer filtering
 - DecimalType(10,2) used for monetary columns — not float/double
   to avoid floating-point precision drift in aggregations
+
+### Gold layer (complete — dbt)
+- Built with dbt-databricks, materialized as Delta tables in ehr_pipeline.gold
+- PySpark for Bronze/Silver, dbt for Gold — two engines, one repo
+- dbt chosen for Gold because: SQL models, lineage tracking, built-in documentation and testing
+
+#### Gold models
+- patient_summary: 11,737 rows (1 row per patient)
+  - CTE pattern to avoid fan-out from multi-fact joins
+  - Left joins to preserve patients with zero encounters/conditions
+  - Aggregates: total_encounters, unique_conditions, total_spend, first/last encounter dates
+- encounter_summary: 400,873 rows (1 row per encounter-condition pair)
+  - Grain changed from per-encounter to per-encounter-condition to preserve diagnostic detail
+  - LEFT JOIN conditions — 80% of encounters had no diagnosis (routine visits preserved)
+  - has_condition boolean flag for downstream filtering
+- condition_prevalence: 1 row per condition code
+  - Prevalence percentage via subquery for total patient count
+  - SNOMED codes (Synthea), not ICD-10 — noted for future mapping
+- provider_metrics: 1 row per provider
+  - COUNT(DISTINCT patient_id) for unique patients — not COUNT(patient_id)
+  - AVG duration preferred over SUM for provider comparison
+- readmission_risk: 393,234 rows (1 row per encounter)
+  - LEAD() window function to find next encounter per patient
+  - 30-day threshold for readmission flag
+  - CTE for portability — column alias referencing varies across SQL engines
+
+#### dbt configuration
+- Profile: gold (in ~/.dbt/profiles.yml)
+- Catalog: ehr_pipeline, schema: gold
+- Materialization: table (not view — Gold serves dashboards and AI agents)
+- Sources defined in _sources.yml pointing to all 7 Silver tables
+- dbt run --select <model> for targeted builds (avoids unnecessary rebuilds)
