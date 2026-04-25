@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: silver
+    catalog: ehr_pipeline
+    schema: silver
+    tables:
+      - name: synthea_patients
+      - name: synthea_encounters
+      - name: synthea_conditions
+      - name: synthea_medications
+      - name: synthea_observations
+      - name: synthea_procedures
+      - name: hv_claims_clean
