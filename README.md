@@ -24,7 +24,11 @@ ehr-medallion-pipeline/
 │   │   ├── models/
 │   │   │   └── gold/
 │   │   │       ├── _sources.yml  # Silver table references
-│   │   │       └── patient_summary.sql
+│   │   │       ├── patient_summary.sql
+│   │   │       ├── encounter_summary.sql
+│   │   │       ├── condition_prevalence.sql
+│   │   │       ├── provider_metrics.sql
+│   │   │       └── readmission_risk.sql
 │   │   └── dbt_project.yml
 │   ├── src/
 │   │   └── ehr_medallion_pipeline/
@@ -43,6 +47,7 @@ ehr-medallion-pipeline/
 │   └── tests/
 └── README.md
 ```
+
 ## Development Workflow
 
 Feature branch per GitHub Issue → PR → merge → delete branch. Commit messages auto-close issues (`closes #N`). Branch naming: `feat/`, `fix/`, `docs/`, `chore/`. Local dev in VSCode, synced to Databricks Repos via GitHub.
@@ -138,16 +143,28 @@ run_full_ingestion(spark, env="dev")
 transform_patients(spark, env="dev")
 ```
 
-### Gold (dbt)
-```bash
-cd ehr_medallion_pipeline/gold
-dbt run
-```
+### Gold Layer (Complete)
+
+Analytical aggregates built with dbt, materialized as Delta tables in `ehr_pipeline.gold`.
+
+| Model | Grain | Status |
+|-------|-------|--------|
+| patient_summary | 1 row per patient | ✅ Complete |
+| encounter_summary | 1 row per encounter-condition | ✅ Complete |
+| condition_prevalence | 1 row per condition code | ✅ Complete |
+| provider_metrics | 1 row per provider | ✅ Complete |
+| readmission_risk | 1 row per encounter | ✅ Complete |
+
+## Dashboard
+
+Databricks SQL dashboard built over Gold layer tables.
+<img width="1385" height="844" alt="image" src="https://github.com/user-attachments/assets/fa218d13-dc60-4f96-8bbb-2eb7871b593b" />
+
 
 ## Roadmap
 
-- [ ] Complete Gold dbt models (encounter_summary, condition_prevalence, provider_metrics, readmission_risk)
-- [ ] Databricks SQL dashboard over Gold tables
+- [x] Complete Gold dbt models (encounter_summary, condition_prevalence, provider_metrics, readmission_risk)
+- [x] Databricks SQL dashboard over Gold tables
 - [ ] Schema drift detection on Bronze layer
 - [ ] Genie AI agent for natural language queries over Gold
 - [ ] dbt tests and documentation for Gold models
