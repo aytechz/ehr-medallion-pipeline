@@ -53,12 +53,22 @@ def capture_schema(spark, catalog: str, schema_name: str, env: str = "dev"):
     registry_df = registry_df.withColumn("_registered_at", F.current_timestamp()) \
                              .withColumn("updated_at", F.current_timestamp())
 
-    # write to registry — overwrite to refresh baseline
-    registry_df.write \
-        .format("delta") \
-        .mode("overwrite") \
-        .option("overwriteSchema", "true") \
-        .saveAsTable(registry_table)
+    # write to registry — delete existing rows for this schema, then append
+    # this preserves baselines for other schemas
+    if spark.catalog.tableExists(registry_table):
+        from delta.tables import DeltaTable
+        delta_table = DeltaTable.forName(spark, registry_table)
+        delta_table.delete(F.col("schema_name") == schema_name)
+        registry_df.write \
+            .format("delta") \
+            .mode("append") \
+            .saveAsTable(registry_table)
+    else:
+        registry_df.write \
+            .format("delta") \
+            .mode("overwrite") \
+            .option("overwriteSchema", "true") \
+            .saveAsTable(registry_table)
 
     print(f"Schema registry captured: {len(rows)} columns across {len(tables)} tables in {schema_name}")
     return registry_df
