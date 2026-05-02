@@ -94,17 +94,17 @@ Cleaned, typed, deduplicated, and enriched. All tables in `ehr_pipeline.silver`.
 - `is_valid_npi` — regex validation (`^\d{10}$`)
 - `DecimalType(10,2)` for monetary columns to avoid floating-point precision drift
 
-### Gold Layer (In Progress)
+### Gold Layer (Complete)
 
 Analytical aggregates built with dbt, materialized as Delta tables in `ehr_pipeline.gold`.
 
 | Model | Grain | Status |
 |-------|-------|--------|
 | patient_summary | 1 row per patient | ✅ Complete |
-| encounter_summary | 1 row per encounter-condition | 🔨 In progress |
-| condition_prevalence | 1 row per condition code | Planned |
-| provider_metrics | 1 row per provider | Planned |
-| readmission_risk | 1 row per encounter | Planned |
+| encounter_summary | 1 row per encounter-condition | ✅ Complete |
+| condition_prevalence | 1 row per condition code | ✅ Complete |
+| provider_metrics | 1 row per provider | ✅ Complete |
+| readmission_risk | 1 row per encounter | ✅ Complete |
 
 **Design decisions:**
 - PySpark for Bronze/Silver (complex ingestion, window functions, programmatic control)
@@ -125,6 +125,8 @@ Analytical aggregates built with dbt, materialized as Delta tables in `ehr_pipel
 **DecimalType over float/double** — Fixed-point arithmetic for monetary columns to prevent precision drift in aggregations.
 
 **PII protection** — SSN, drivers license, passport dropped in Silver. Maiden name excluded from Gold. No PII in analytical tables.
+
+**Schema drift detection** — Baseline schema captured in Delta registry table. On each run, current schema compared via set operations (left_anti joins). Three drift types detected: columns added, removed, or type changed. Drift events logged with timestamps for audit.
 
 ## Running the Pipeline
 
@@ -165,7 +167,7 @@ Databricks SQL dashboard built over Gold layer tables.
 
 - [x] Complete Gold dbt models (encounter_summary, condition_prevalence, provider_metrics, readmission_risk)
 - [x] Databricks SQL dashboard over Gold tables
-- [ ] Schema drift detection on Bronze layer
+- [x] Schema drift detection on Bronze layer
 - [ ] Genie AI agent for natural language queries over Gold
 - [ ] dbt tests and documentation for Gold models
 

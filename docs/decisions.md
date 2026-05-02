@@ -132,3 +132,11 @@ _ingested_at > last_watermark.
 - Materialization: table (not view — Gold serves dashboards and AI agents)
 - Sources defined in _sources.yml pointing to all 7 Silver tables
 - dbt run --select <model> for targeted builds (avoids unnecessary rebuilds)
+
+### Schema drift detection (Issue #10)
+- Baseline stored in ehr_pipeline.bronze.schema_registry (Delta table)
+- Delta chosen over config file — queryable, automatable, auditable
+- detect_drift() uses left_anti joins for set comparison
+- Drift log is append-only — preserves full history
+- Registry uses delete + append per schema to avoid cross-schema overwrites
+- Checks both Bronze (188 columns, 15 tables) and Silver (137 columns, 7 tables)
