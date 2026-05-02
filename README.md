@@ -4,11 +4,72 @@ End-to-end healthcare data pipeline on Databricks using Medallion architecture (
 
 ## Architecture
 
-<img width="700" height="700" alt="image" src="https://github.com/user-attachments/assets/41af0bd2-45c7-455e-b89b-dd8bf9e81ff1" />
+```mermaid
+graph TD
+    S1["<b>Synthea EHR</b><br/>12 CSV tables"]
+    S2["<b>HealthVerity claims</b><br/>Unity Catalog"]
+
+    B["<b>Bronze</b> · raw ingestion<br/>13 Delta tables · append mode<br/>Audit trail · config-driven"]
+
+    SV["<b>Silver</b> · clean & enrich<br/>7 tables · MD5 dedup · DecimalType<br/>PII removed · ICD-10 broadcast join"]
+
+    G["<b>Gold</b> · analytics<br/>5 dbt models · star schema"]
+
+    D["<b>SQL Dashboard</b><br/>✓ Complete"]
+    AI["<b>Genie AI Agent</b><br/>Planned"]
+    SD["<b>Schema drift</b><br/>✓ Complete"]
+
+    S1 --> B
+    S2 --> B
+    B --> SV
+    B -.observes.-> SD
+    SV --> G
+    G --> D
+    G --> AI
+
+    classDef source fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
+    classDef bronze fill:#FAECE7,stroke:#993C1D,color:#4A1B0C
+    classDef silver fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+    classDef gold fill:#FAEEDA,stroke:#854F0B,color:#412402
+    classDef complete fill:#EEEDFE,stroke:#3C3489,color:#26215C
+    classDef planned fill:#F1EFE8,stroke:#888780,color:#5F5E5A,stroke-dasharray: 5 5
+
+    class S1,S2 source
+    class B bronze
+    class SV silver
+    class G gold
+    class D,SD complete
+    class AI planned
+```
 
 ## Tech Stack
 
-<img width="700" height="700" alt="image" src="https://github.com/user-attachments/assets/aa2fb501-2eb0-4098-be41-b921a27a0734" />
+**Platform**
+
+![Databricks](https://img.shields.io/badge/Databricks-FF3621?style=for-the-badge&logo=databricks&logoColor=white)
+![Unity Catalog](https://img.shields.io/badge/Unity_Catalog-1B3139?style=for-the-badge&logo=databricks&logoColor=white)
+![Delta Lake](https://img.shields.io/badge/Delta_Lake-00ADD4?style=for-the-badge&logo=delta&logoColor=white)
+
+**Languages**
+
+![PySpark](https://img.shields.io/badge/PySpark-E25A1C?style=for-the-badge&logo=apachespark&logoColor=white)
+![SQL](https://img.shields.io/badge/SQL-336791?style=for-the-badge&logo=databricks&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+
+**Tools**
+
+![dbt](https://img.shields.io/badge/dbt-FF694A?style=for-the-badge&logo=dbt&logoColor=white)
+![Asset Bundles](https://img.shields.io/badge/Asset_Bundles-1B3139?style=for-the-badge&logo=databricks&logoColor=white)
+![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)
+
+**Workflow**
+
+![VS Code](https://img.shields.io/badge/VS_Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)
+![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
+
+**Data sources:** Synthea EHR (12 CSV tables) · HealthVerity claims (Unity Catalog)
+
+**Approach:** Bronze/Silver → PySpark modules · Gold → dbt SQL models · Same repo, two engines
 
 ## Project Structure
 
@@ -57,7 +118,8 @@ Feature branch per GitHub Issue → PR → merge → delete branch. Commit messa
 ### Bronze Layer (Complete)
 
 Raw ingestion with full audit trail. All tables land in `ehr_pipeline.bronze`.
-<img width="700" height="700" alt="image" src="https://github.com/user-attachments/assets/e331818f-e7ca-4263-a0f4-e939a8c50cb6" />
+
+<img width="700" height="700" alt="Bronze layer overview" src="https://github.com/user-attachments/assets/e331818f-e7ca-4263-a0f4-e939a8c50cb6" />
 
 | Table | Rows | Source |
 |-------|------|--------|
@@ -71,11 +133,8 @@ Raw ingestion with full audit trail. All tables land in `ehr_pipeline.bronze`.
 | hv_claims_raw | 409,825 | Unity Catalog |
 
 ### Silver Layer (Complete)
+
 Cleaned, typed, deduplicated, and enriched. All tables in `ehr_pipeline.silver`.
-<img width="700" height="700" alt="image" src="https://github.com/user-attachments/assets/f7c12ad4-1e04-4e87-b305-030b1cc052a7" />
-
-
-
 
 | Table | Rows | Key Transformations |
 |-------|------|---------------------|
@@ -136,6 +195,7 @@ Analytical aggregates built with dbt, materialized as Delta tables in `ehr_pipel
 - Personal access token configured
 
 ### Bronze + Silver (PySpark)
+
 ```python
 # In a Databricks notebook
 from ehr_medallion_pipeline.bronze.ingest_synthea import run_full_ingestion
@@ -145,23 +205,19 @@ run_full_ingestion(spark, env="dev")
 transform_patients(spark, env="dev")
 ```
 
-### Gold Layer (Complete)
+### Gold (dbt)
 
-Analytical aggregates built with dbt, materialized as Delta tables in `ehr_pipeline.gold`.
-
-| Model | Grain | Status |
-|-------|-------|--------|
-| patient_summary | 1 row per patient | ✅ Complete |
-| encounter_summary | 1 row per encounter-condition | ✅ Complete |
-| condition_prevalence | 1 row per condition code | ✅ Complete |
-| provider_metrics | 1 row per provider | ✅ Complete |
-| readmission_risk | 1 row per encounter | ✅ Complete |
+```bash
+cd ehr_medallion_pipeline/gold
+dbt run --target dev
+dbt test --target dev
+```
 
 ## Dashboard
 
 Databricks SQL dashboard built over Gold layer tables.
-<img width="1385" height="844" alt="image" src="https://github.com/user-attachments/assets/fa218d13-dc60-4f96-8bbb-2eb7871b593b" />
 
+<img width="1385" height="844" alt="Databricks SQL dashboard" src="https://github.com/user-attachments/assets/fa218d13-dc60-4f96-8bbb-2eb7871b593b" />
 
 ## Roadmap
 
