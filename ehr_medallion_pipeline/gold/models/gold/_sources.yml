@@ -4,11 +4,656 @@ sources:
   - name: silver
     catalog: ehr_pipeline
     schema: silver
+    description: "Cleaned and conformed Silver layer. Derived from Bronze raw ingests via PySpark transforms in src/ehr_medallion_pipeline/silver/. Column-level semantics are owned by the transform code; this file documents the contract as exposed to downstream Gold models and AI tooling (Genie)."
+
     tables:
+
+      # ============================================================
+      # synthea_patients
+      # ============================================================
       - name: synthea_patients
+        description: "One row per synthetic patient from Synthea. Deduplicated by patient id, latest ingestion wins. PII partially removed (SSN, drivers license, passport dropped; names and addresses retained — see tech debt issue for full PII scrub)."
+        columns:
+
+          # --- Identity ---
+          - name: id
+            description: "Synthea-generated patient identifier. Primary key for this table; foreign key target for encounters, conditions, medications, observations, procedures."
+            tests:
+              - unique
+              - not_null
+
+          # --- Demographics: dates ---
+          - name: birthdate
+            description: "Patient date of birth. Cast to DATE from string in Silver transform."
+            tests:
+              - not_null
+
+          - name: deathdate
+            description: "Patient date of death. NULL if patient is living. Synthea source uses '-' for missing values, normalized to NULL in the Silver transform via F.when()."
+
+          - name: patient_age
+            description: "Derived integer age in years. Calculated as (current_date - birthdate) / 365 at the time of Silver transform run. NOTE: This value is stale-by-design — for point-in-time accuracy, recompute downstream from birthdate."
+            tests:
+              - not_null
+
+          - name: is_deceased
+            description: "Boolean flag. True when deathdate IS NOT NULL, otherwise False. Derived in Silver transform."
+            tests:
+              - not_null
+
+          # --- Demographics: categorical ---
+          - name: gender
+            description: "Patient gender as recorded in Synthea. Values: 'M', 'F'. Note: Synthea is binary by design; real EHR data would include 'O' / other / null."
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['M', 'F']
+
+          - name: marital_status
+            description: "Decoded marital status. Source 'M' → 'Married', 'S' → 'Single', anything else → 'Unknown'. Decoded in Silver transform."
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['Married', 'Single', 'Unknown']
+
+          - name: race
+            description: "Patient race as recorded in Synthea. Categorical demographic field. Value set is Synthea-generator-specific."
+
+          - name: ethnicity
+            description: "Patient ethnicity as recorded in Synthea. Categorical demographic field. Value set is Synthea-generator-specific."
+
+          # --- PII: name fields ---
+          - name: prefix
+            description: "Patient name prefix (e.g. 'Mr.', 'Ms.'). PII. Often NULL."
+
+          - name: first
+            description: "Patient first name. PII — should be excluded from downstream PII-sensitive contexts."
+
+          - name: last
+            description: "Patient last name. PII — should be excluded from downstream PII-sensitive contexts."
+
+          - name: suffix
+            description: "Patient name suffix (e.g. 'Jr.', 'II'). PII. Often NULL."
+
+          - name: maiden
+            description: "Patient maiden name. PII. Often NULL — populated only when applicable."
+
+          # --- PII: location fields ---
+          - name: birthplace
+            description: "Patient birthplace (free-text location string). PII."
+
+          - name: address
+            description: "Patient street address. PII."
+
+          - name: city
+            description: "Patient city of residence. PII."
+
+          - name: state
+            description: "Patient US state of residence. Two-letter abbreviation expected."
+
+          - name: zip
+            description: "Patient ZIP code. Stored as string to preserve leading zeros. PII."
+
+          # --- Audit columns ---
+          - name: _ingested_at
+            description: "Timestamp when the record was ingested into Bronze. Propagated through Silver for end-to-end lineage tracking. Used as the ordering key for Silver deduplication."
+            tests:
+              - not_null
+
+          - name: _source_file
+            description: "Filename of the source CSV from which this record was ingested. Used for lineage and debugging."
+            tests:
+              - not_null
+
+          - name: _silver_processed_at
+            description: "Timestamp set when the Silver transform ran. Distinct from _ingested_at (Bronze ingest time). Used for Silver-layer freshness monitoring."
+            tests:
+              - not_null
+
+      # ============================================================
+      # synthea_encounters
+      # ============================================================
       - name: synthea_encounters
+        description: "One row per patient encounter (visit). Cast and renamed in Silver: 'patient' → patient_id, 'provider' → provider_id; derived duration_minutes, encounter_year, encounter_month. Partitioned by year/month. Foreign key to synthea_patients via patient_id."
+        columns:
+
+          # --- Identity ---
+          - name: id
+            description: "Synthea-generated encounter identifier. Primary key for this table; foreign key target for conditions, medications, observations, procedures via encounter_id."
+            tests:
+              - unique
+              - not_null
+
+          - name: patient_id
+            description: "Foreign key to synthea_patients.id. Renamed from source 'patient' column in Silver transform."
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('silver', 'synthea_patients')
+                    field: id
+
+          - name: provider_id
+            description: "Identifier of the provider associated with the encounter. Renamed from source 'provider' column. No provider dimension table in Silver."
+
+          # --- Encounter timing ---
+          - name: start
+            description: "Encounter start timestamp. Cast from ISO-8601 string in Silver via F.to_timestamp with explicit format yyyy-MM-dd'T'HH:mm:ss'Z'."
+            tests:
+              - not_null
+
+          - name: stop
+            description: "Encounter end timestamp. Cast from ISO-8601 string in Silver."
+
+          - name: duration_minutes
+            description: "Derived integer. Calculated as (unix_timestamp(stop) - unix_timestamp(start)) / 60. NULL when stop is NULL (open encounters)."
+
+          - name: encounter_year
+            description: "Derived integer year of encounter.start. Used as a partition column for query pruning."
+            tests:
+              - not_null
+
+          - name: encounter_month
+            description: "Derived integer month (1-12) of encounter.start. Used as a partition column for query pruning."
+            tests:
+              - not_null
+
+          # --- Encounter classification ---
+          - name: encounterclass
+            description: "Categorical encounter type from Synthea (e.g. ambulatory, emergency, inpatient, outpatient, wellness, urgentcare). Value set is Synthea-generator-specific; accepted_values test deferred until value set is verified against the data."
+
+          - name: code
+            description: "Encounter type code (typically SNOMED). Identifies the kind of encounter."
+
+          - name: description
+            description: "Human-readable description of the encounter type code."
+
+          - name: reasoncode
+            description: "Code for the reason for the encounter (typically SNOMED). NULL when not specified."
+
+          - name: reasondescription
+            description: "Human-readable description of the reason code. NULL when not specified."
+
+          # --- Cost ---
+          - name: cost
+            description: "Encounter cost in USD. Currently stored as DOUBLE. TECH DEBT: should be DecimalType(10,2) — tracked in fix/monetary-decimal-precision."
+
+          # --- Audit columns ---
+          - name: _ingested_at
+            description: "Bronze ingestion timestamp. Propagated through Silver for lineage."
+            tests:
+              - not_null
+          - name: _source_file
+            description: "Source CSV filename for lineage and debugging."
+            tests:
+              - not_null
+          - name: _silver_processed_at
+            description: "Silver transform run timestamp."
+            tests:
+              - not_null
+
+      # ============================================================
+      # synthea_conditions
+      # ============================================================
       - name: synthea_conditions
+        description: "One row per diagnosed condition per patient encounter. Synthea source has no natural primary key; Silver transform generates condition_id via MD5 hash of (patient_id, encounter_id, condition_code, start). Foreign keys to synthea_patients (patient_id) and synthea_encounters (encounter_id)."
+        columns:
+
+          # --- Identity ---
+          - name: condition_id
+            description: "Surrogate primary key. MD5 hash of concat_ws('_', patient_id, encounter_id, condition_code, start). Stable across reruns, collision-resistant, PII-obfuscating."
+            tests:
+              - unique
+              - not_null
+
+          - name: patient_id
+            description: "Foreign key to synthea_patients.id. Renamed from source 'patient'."
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('silver', 'synthea_patients')
+                    field: id
+
+          - name: encounter_id
+            description: "Foreign key to synthea_encounters.id. Renamed from source 'encounter'."
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('silver', 'synthea_encounters')
+                    field: id
+
+          # --- Condition details ---
+          - name: condition_code
+            description: "Diagnosis code (typically SNOMED). Renamed from source 'code'."
+            tests:
+              - not_null
+
+          - name: condition_description
+            description: "Human-readable description of the condition code. Renamed from source 'description'."
+
+          - name: start
+            description: "Condition onset date. Cast to DATE from string in Silver."
+            tests:
+              - not_null
+
+          - name: stop
+            description: "Condition resolution date. NULL for ongoing/chronic conditions."
+
+          # --- Audit columns ---
+          - name: _ingested_at
+            description: "Bronze ingestion timestamp."
+            tests:
+              - not_null
+          - name: _source_file
+            description: "Source CSV filename."
+            tests:
+              - not_null
+          - name: _silver_processed_at
+            description: "Silver transform run timestamp."
+            tests:
+              - not_null
+
+      # ============================================================
+      # synthea_medications
+      # ============================================================
       - name: synthea_medications
+        description: "One row per medication prescription per patient encounter. Synthea source has no natural primary key; Silver transform generates medication_id via MD5 hash of (patient_id, encounter_id, medication_code, start). Foreign keys to synthea_patients and synthea_encounters."
+        columns:
+
+          # --- Identity ---
+          - name: medication_id
+            description: "Surrogate primary key. MD5 hash of concat_ws('_', patient_id, encounter_id, medication_code, start). Stable across reruns."
+            tests:
+              - unique
+              - not_null
+
+          - name: patient_id
+            description: "Foreign key to synthea_patients.id. Renamed from source 'patient'."
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('silver', 'synthea_patients')
+                    field: id
+
+          - name: encounter_id
+            description: "Foreign key to synthea_encounters.id. Renamed from source 'encounter'."
+            tests:
+              - not_null
+
+          # --- Medication details ---
+          - name: medication_code
+            description: "Medication code (typically RxNorm). Renamed from source 'code'."
+            tests:
+              - not_null
+
+          - name: medication_description
+            description: "Human-readable medication name. Renamed from source 'description'."
+
+          - name: start
+            description: "Medication start date. Cast to DATE."
+            tests:
+              - not_null
+
+          - name: stop
+            description: "Medication end date. NULL for ongoing prescriptions."
+
+          # --- Cost / quantity ---
+          - name: cost
+            description: "Cost per dispense in USD. Currently DOUBLE. TECH DEBT: should be DecimalType(10,2)."
+
+          - name: dispenses
+            description: "Integer count of dispenses for this medication."
+
+          - name: totalcost
+            description: "Total cost across all dispenses. Currently DOUBLE. TECH DEBT: should be DecimalType(10,2). Note: not enforced equal to cost × dispenses; treat as source-provided."
+
+          # --- Reason ---
+          - name: reasoncode
+            description: "Code for the indication / reason for prescription. NULL when not specified."
+
+          - name: reasondescription
+            description: "Human-readable reason text."
+
+          # --- Audit columns ---
+          - name: _ingested_at
+            description: "Bronze ingestion timestamp."
+            tests:
+              - not_null
+          - name: _source_file
+            description: "Source CSV filename."
+            tests:
+              - not_null
+          - name: _silver_processed_at
+            description: "Silver transform run timestamp."
+            tests:
+              - not_null
+
+      # ============================================================
+      # synthea_observations
+      # ============================================================
       - name: synthea_observations
+        description: "One row per clinical observation (vitals, labs, etc.) per patient encounter. Highest-volume Synthea table. Silver transform splits polymorphic 'value' column into typed numeric_value and text_value based on 'type'. Surrogate key observation_id generated via MD5. Partitioned by observation_year + observation_month for query performance."
+        columns:
+
+          # --- Identity ---
+          - name: observation_id
+            description: "Surrogate primary key. MD5 hash of concat_ws('_', patient_id, encounter_id, observation_code, date). Stable across reruns."
+            tests:
+              - unique
+              - not_null
+
+          - name: patient_id
+            description: "Foreign key to synthea_patients.id. Renamed from source 'patient'."
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('silver', 'synthea_patients')
+                    field: id
+
+          - name: encounter_id
+            description: "Foreign key to synthea_encounters.id. Renamed from source 'encounter'."
+            tests:
+              - not_null
+
+          # --- Observation details ---
+          - name: observation_code
+            description: "Observation code (typically LOINC). Renamed from source 'code'."
+            tests:
+              - not_null
+
+          - name: observation_description
+            description: "Human-readable observation name. Renamed from source 'description'."
+
+          - name: date
+            description: "Observation date. Cast to DATE."
+            tests:
+              - not_null
+
+          - name: type
+            description: "Observation value type. Values: 'numeric' or 'text'. Determines whether numeric_value or text_value is populated. Used in Silver transform to split the polymorphic source 'value' column."
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['numeric', 'text']
+
+          - name: units
+            description: "Units of measurement for numeric observations (e.g. 'mg/dL', 'mmHg'). NULL for text observations."
+
+          - name: numeric_value
+            description: "Numeric measurement value. Populated only when type='numeric' (otherwise NULL). Derived from source 'value' column via F.when(type='numeric', value.cast('double'))."
+
+          - name: text_value
+            description: "Text observation value. Populated only when type='text' (otherwise NULL). Derived from source 'value' column."
+
+          # --- Partition columns ---
+          - name: observation_year
+            description: "Derived integer year of observation date. Partition column."
+            tests:
+              - not_null
+
+          - name: observation_month
+            description: "Derived integer month (1-12) of observation date. Partition column."
+            tests:
+              - not_null
+
+          # --- Audit columns ---
+          - name: _ingested_at
+            description: "Bronze ingestion timestamp."
+            tests:
+              - not_null
+          - name: _source_file
+            description: "Source CSV filename."
+            tests:
+              - not_null
+          - name: _silver_processed_at
+            description: "Silver transform run timestamp."
+            tests:
+              - not_null
+
+      # ============================================================
+      # synthea_procedures
+      # ============================================================
       - name: synthea_procedures
+        description: "One row per clinical procedure performed on a patient. Synthea source has no natural primary key; Silver transform generates procedure_id via MD5 hash. Partitioned by procedure_year. Foreign keys to synthea_patients and synthea_encounters."
+        columns:
+
+          # --- Identity ---
+          - name: procedure_id
+            description: "Surrogate primary key. MD5 hash of concat_ws('_', patient_id, encounter_id, procedure_code, date). Stable across reruns."
+            tests:
+              - unique
+              - not_null
+
+          - name: patient_id
+            description: "Foreign key to synthea_patients.id. Renamed from source 'patient'."
+            tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('silver', 'synthea_patients')
+                    field: id
+
+          - name: encounter_id
+            description: "Foreign key to synthea_encounters.id. Renamed from source 'encounter'."
+            tests:
+              - not_null
+
+          # --- Procedure details ---
+          - name: procedure_code
+            description: "Procedure code (typically SNOMED / CPT). Renamed from source 'code'."
+            tests:
+              - not_null
+
+          - name: procedure_description
+            description: "Human-readable procedure description. Renamed from source 'description'."
+
+          - name: date
+            description: "Procedure date. Cast to DATE."
+            tests:
+              - not_null
+
+          - name: procedure_year
+            description: "Derived integer year of procedure date. Partition column."
+            tests:
+              - not_null
+
+          # --- Cost ---
+          - name: cost
+            description: "Procedure cost in USD. Currently DOUBLE. TECH DEBT: should be DecimalType(10,2)."
+
+          # --- Reason ---
+          - name: reasoncode
+            description: "Code for the reason for the procedure. NULL when not specified."
+
+          - name: reasondescription
+            description: "Human-readable reason text."
+
+          # --- Audit columns ---
+          - name: _ingested_at
+            description: "Bronze ingestion timestamp."
+            tests:
+              - not_null
+          - name: _source_file
+            description: "Source CSV filename."
+            tests:
+              - not_null
+          - name: _silver_processed_at
+            description: "Silver transform run timestamp."
+            tests:
+              - not_null
+
+      # ============================================================
+      # hv_claims_clean
+      # ============================================================
       - name: hv_claims_clean
+        description: "Cleaned HealthVerity claims data, sourced from samples.healthverity.claims_sample_synthetic (~327,788 rows). Enriched in Silver with: diagnosis_category (broadcast join on ICD-10 first character), cost_reduction (line_charge - line_allowed), claim_type_decoded, is_valid_npi (regex), patient_age (current_year - patient_year_of_birth). Monetary columns use DecimalType for precision. Unrelated to Synthea patient identifiers — represents claims-side data for payer analysis."
+        columns:
+
+          # --- Identity ---
+          - name: claim_line_id
+            description: "Surrogate primary key. MD5 hash of concat_ws('_', claim_id, service_line_number, diagnosis_code). Each row represents one diagnosis/procedure line within a claim."
+            tests:
+              - unique
+              - not_null
+
+          - name: claim_id
+            description: "HealthVerity claim identifier. Not unique by itself — a single claim has multiple service lines."
+            tests:
+              - not_null
+
+          - name: hvid
+            description: "HealthVerity patient identifier. Not joinable to Synthea patient IDs."
+
+          - name: service_line_number
+            description: "Integer line number within a claim. Used as part of the surrogate key."
+
+          # --- Claim type ---
+          - name: claim_type
+            description: "Raw HealthVerity claim type code. Values observed: 'P' (Professional), 'I' (Institutional)."
+
+          - name: claim_type_decoded
+            description: "Decoded claim type. 'P' → 'Professional', 'I' → 'Institutional', any other value → NULL. Derived in Silver transform."
+            tests:
+              - accepted_values:
+                  arguments:
+                    values: ['Professional', 'Institutional']
+
+          # --- Dates ---
+          - name: date_service
+            description: "Date of service. Cast to DATE in Silver."
+
+          # --- Patient demographics ---
+          - name: patient_gender
+            description: "Patient gender as recorded by the payer."
+
+          - name: patient_year_of_birth
+            description: "Integer year of birth. Used to derive patient_age."
+
+          - name: patient_age
+            description: "Derived integer. Calculated as year(current_date) - patient_year_of_birth. Stale-by-design; recompute downstream if point-in-time accuracy needed."
+
+          - name: patient_state
+            description: "Patient US state of residence (two-letter)."
+
+          - name: patient_zip3
+            description: "First 3 digits of patient ZIP code. HIPAA-safe geographic granularity (vs full 5-digit ZIP)."
+
+          # --- Diagnosis ---
+          - name: diagnosis_code
+            description: "Primary diagnosis code on the claim line. ICD-10 format expected."
+
+          - name: diagnosis_code_qual
+            description: "Qualifier indicating the diagnosis code system (e.g. ICD-10 vs ICD-9)."
+
+          - name: admit_diagnosis_ind
+            description: "Indicator of whether this diagnosis was the admitting diagnosis (institutional claims)."
+
+          - name: icd10_letter
+            description: "First character of diagnosis_code. Derived in Silver via F.substring. Used as join key for diagnosis_category lookup."
+
+          - name: diagnosis_category
+            description: "Decoded diagnosis category from ICD-10 first character via broadcast join on a 25-row in-memory lookup. Examples: 'Circulatory System', 'Mental / Behavioral', 'Injury / Poisoning'. NULL if icd10_letter is not in the lookup map (rare — 'U' is the main gap)."
+
+          # --- Procedure ---
+          - name: procedure_code
+            description: "Procedure code on the claim line. CPT/HCPCS format expected."
+
+          - name: procedure_code_qual
+            description: "Qualifier for the procedure code system."
+
+          - name: procedure_units_billed
+            description: "Units billed for the procedure. String type from source."
+
+          - name: procedure_modifier_1
+            description: "First CPT modifier (e.g. '25', '59'). NULL when not used."
+
+          - name: procedure_modifier_2
+            description: "Second CPT modifier. NULL when not used."
+
+          - name: procedure_modifier_3
+            description: "Third CPT modifier. NULL when not used."
+
+          - name: procedure_modifier_4
+            description: "Fourth CPT modifier. NULL when not used."
+
+          # --- Institutional claim fields ---
+          - name: inst_admit_type_std_id
+            description: "Standardized admit type code (institutional claims only). NULL for professional claims."
+
+          - name: inst_admit_source_std_id
+            description: "Standardized admit source code (institutional claims only)."
+
+          - name: inst_discharge_status_std_id
+            description: "Standardized discharge status code (institutional claims only)."
+
+          - name: inst_type_of_bill_std_id
+            description: "Standardized type-of-bill code (institutional claims only)."
+
+          - name: inst_drg_std_id
+            description: "Standardized DRG (Diagnosis-Related Group) code (institutional claims only)."
+
+          - name: place_of_service_std_id
+            description: "Standardized place-of-service code (e.g. office, ER, inpatient hospital)."
+
+          - name: revenue_code
+            description: "Revenue code identifying the type of service for billing (institutional claims)."
+
+          # --- Monetary ---
+          - name: line_charge
+            description: "Amount billed by provider for this claim line. DecimalType(10,2). Always ≥ line_allowed in practice."
+
+          - name: line_allowed
+            description: "Amount allowed (payer-negotiated) for this claim line. DecimalType(10,2)."
+
+          - name: cost_reduction
+            description: "Derived DecimalType(11,2). Equals line_charge - line_allowed. Represents the payer-negotiated discount. Note precision is (11,2) due to potential subtraction overflow."
+
+          # --- Payer ---
+          - name: payer_type
+            description: "Type of payer for this claim (e.g. 'Commercial', 'Medicare', 'Medicaid'). Primary grouping dimension for the cost-reduction dashboard."
+
+          # --- Provider identifiers ---
+          - name: prov_rendering_npi
+            description: "National Provider Identifier (NPI) of the rendering provider. 10-digit format expected."
+
+          - name: prov_billing_npi
+            description: "NPI of the billing provider."
+
+          - name: prov_referring_npi
+            description: "NPI of the referring provider. NULL when not applicable."
+
+          - name: is_valid_npi
+            description: "Boolean. True when prov_rendering_npi matches regex ^\\d{10}$, otherwise False. Derived in Silver transform for data quality monitoring."
+            tests:
+              - not_null
+
+          # --- Provider taxonomy ---
+          - name: prov_rendering_std_taxonomy
+            description: "Standardized taxonomy code for the rendering provider's specialty."
+
+          - name: prov_billing_std_taxonomy
+            description: "Standardized taxonomy code for the billing provider's specialty."
+
+          - name: prov_referring_std_taxonomy
+            description: "Standardized taxonomy code for the referring provider's specialty."
+
+          # --- Audit columns ---
+          - name: _ingested_at
+            description: "Bronze ingestion timestamp."
+            tests:
+              - not_null
+          - name: _source_file
+            description: "Source CSV filename / source table identifier."
+            tests:
+              - not_null
+          - name: _silver_processed_at
+            description: "Silver transform run timestamp."
+            tests:
+              - not_null
