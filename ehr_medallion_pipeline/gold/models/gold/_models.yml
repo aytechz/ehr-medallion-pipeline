@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: patient_summary
+    description: "One row per patient with lifetime aggregated metrics. Built by joining synthea_patients with pre-aggregated encounter and condition CTEs. LEFT JOINs preserve patients with zero encounters or zero conditions — those rows have NULLs in the aggregated columns. Grain: patient."
+    columns:
+
+      # --- Identity ---
+      - name: id
+        description: "Patient identifier. Equals synthea_patients.id. TECH DEBT: should be aliased as patient_id for clarity (tracked separately)."
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: source('silver', 'synthea_patients')
+                field: id
+
+      # --- Encounter aggregates (from encounter_agg CTE, LEFT JOINed) ---
+      - name: total_encounters
+        description: "Lifetime count of encounters for this patient. NULL when patient has no encounters in synthea_encounters."
+
+      - name: total_spend
+        description: "Lifetime sum of encounter.cost in USD, rounded to 2 decimals. NULL when patient has no encounters. TECH DEBT: aggregated from DOUBLE source — should use DecimalType(18,2) downstream to prevent overflow."
+
+      - name: first_encounter_date
+        description: "Date of the patient's earliest encounter. NULL when patient has no encounters."
+
+      - name: last_encounter_date
+        description: "Date of the patient's most recent encounter. NULL when patient has no encounters."
+
+      # --- Condition aggregates (from condition_agg CTE, LEFT JOINed) ---
+      - name: unique_conditions
+        description: "Count of distinct condition codes diagnosed for this patient over their lifetime. NULL when patient has no conditions."
+
+      # --- Patient attributes (passthrough from synthea_patients) ---
+      - name: patient_age
+        description: "Patient age in years at time of last Silver transform run. Passthrough from synthea_patients.patient_age. Stale-by-design."
+        tests:
+          - not_null
+
+      - name: gender
+        description: "Patient gender. Passthrough from synthea_patients.gender."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['M', 'F']
+
+      - name: is_deceased
+        description: "Boolean. Passthrough from synthea_patients.is_deceased."
+        tests:
+          - not_null
+
+      - name: marital_status
+        description: "Decoded marital status. Passthrough from synthea_patients.marital_status."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Married', 'Single', 'Unknown']
