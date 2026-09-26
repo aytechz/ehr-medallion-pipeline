@@ -59,3 +59,26 @@ models:
           - accepted_values:
               arguments:
                 values: ['Married', 'Single', 'Unknown']
+  
+  - name: encounter_summary
+    description: "One row per encounter × condition. Built from synthea_encounters LEFT JOIN synthea_conditions (on encounter_id) INNER JOIN synthea_patients (on patient_id). An encounter with multiple conditions appears once per condition; an encounter with no conditions appears once, with condition_code and condition_description NULL and has_condition FALSE. Encounters whose patient is missing from synthea_patients are excluded. WARNING: encounter-level values repeat across condition rows — count encounters with COUNT(DISTINCT encounter_id), and do not SUM or AVG encounter_cost or duration_minutes directly from this table."
+    columns:
+
+    # --- Identity ---
+      - name: encounter_id
+        description: "Encounter identifier. Passthrough from synthea_encounters.id. NOT unique in this table — repeats once per condition diagnosed during the encounter."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: source('silver', 'synthea_encounters')
+                field: id
+
+      - name: patient_id
+        description: "Patient identifier. Passthrough from synthea_encounters.patient_id. Always matches a synthea_patients.id, since encounters without a matching patient are excluded by the INNER JOIN."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: source('silver', 'synthea_patients')
+                field: id
