@@ -140,3 +140,25 @@ _ingested_at > last_watermark.
 - Drift log is append-only — preserves full history
 - Registry uses delete + append per schema to avoid cross-schema overwrites
 - Checks both Bronze (188 columns, 15 tables) and Silver (137 columns, 7 tables)
+
+## 2026-05-23 — AI Agent Layer: LLM provider and framework
+
+**Context:** Issue #12 requires an AI agent layer over the Gold tables. Two parallel deliverables: a Genie Space for business users, and a code-first agent for technical demonstration.
+
+**Decision:**
+- LLM: Databricks-hosted Llama 4 Maverick via AI Gateway (OpenAI-compatible endpoint)
+- Framework: LangGraph for the code-first agent
+- Client: `openai` Python SDK pointed at AI Gateway base URL
+
+**Alternatives considered:**
+- Anthropic API direct → ruled out (avoid external billing during development)
+- Databricks Mosaic AI Agent Framework → ruled out (Databricks-specific abstractions reduce portability signal; framework hides agent-loop primitives that have higher learning value)
+- Classic LangChain → ruled out (deprecated patterns, weaker interview signal)
+- Raw Anthropic SDK loop with no framework → considered but LangGraph's explicit state-machine model offers a better whiteboard-able interview narrative
+- Gemini 3.5 Flash on Databricks → ruled out (Free Edition rate-limit-0 gating)
+
+**Tradeoffs accepted:**
+- Llama 4 tool use is slightly less reliable than Claude — handling tool-call edge cases becomes part of the agent's error-handling story, which is actually valuable learning content
+- Gateway routing means inference latency and quota are subject to Databricks Free Edition policy
+
+**Portability story:** OpenAI-compatible client means the same agent code can target Anthropic, OpenAI, Groq, or any other OpenAI-protocol provider by changing `base_url` and `api_key`. This is intentional architectural decoupling.
