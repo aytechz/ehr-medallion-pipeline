@@ -34,3 +34,6 @@ models:
   gold:
     gold:
       +materialized: table
+      +persist_docs:
+        relation: true
+        columns: true
