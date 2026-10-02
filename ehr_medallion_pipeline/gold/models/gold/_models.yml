@@ -124,3 +124,31 @@ models:
         description: "Boolean. TRUE when this row carries a diagnosis (condition_code is not NULL); FALSE for encounters with no conditions. Filter has_condition = TRUE when counting diagnoses."
         tests:
           - not_null
+      # --- Patient attributes (from synthea_patients, INNER JOINed) ---
+      - name: patient_age
+        description: "Patient's CURRENT age in years as of the last Silver run — NOT age at the time of the encounter. Passthrough from synthea_patients.patient_age. Patient-level value — repeats on every row for the same patient."
+        tests:
+          - not_null
+
+      - name: gender
+        description: "Patient gender: 'M' or 'F'. Passthrough from synthea_patients.gender."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['M', 'F']
+
+      # --- Time grouping columns (derived in Silver from encounter_start, UTC) ---
+      - name: encounter_year
+        description: "Calendar year of encounter_start (UTC). Use for yearly trends."
+        tests:
+          - not_null
+
+      - name: encounter_month
+        description: "Calendar month of encounter_start (UTC), 1–12. Combine with encounter_year for monthly trends."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
