@@ -140,3 +140,10 @@ _ingested_at > last_watermark.
 - Drift log is append-only — preserves full history
 - Registry uses delete + append per schema to avoid cross-schema overwrites
 - Checks both Bronze (188 columns, 15 tables) and Silver (137 columns, 7 tables)
+
+## Gold model documentation and testing (Issue #25)
+- All 5 Gold models documented in `_models.yml`; descriptions written for both engineers and Genie (grain, NULL meaning, units, query warnings). Tech-debt notes moved to `config.meta` so they stay out of Unity Catalog comments.
+- Singular tests added in `tests/` for rules generic tests can't express: composite grain, flag consistency, value ranges.
+- `condition_prevalence`: Synthea maps code 427089005 to two unrelated conditions. Kept code + description grain (grouping by code alone would mislabel patients); added a severity=warn monitor.
+- `provider_metrics`: 1,235 encounters (~0.3%) have no provider in the source. Grouped as 'UNKNOWN' so totals still reconcile with encounters.
+- `readmission_risk`: flags any return visit within 30 days (~45% of encounters), not clinical readmission. Documented the limitation; inpatient-only model tracked in #30.

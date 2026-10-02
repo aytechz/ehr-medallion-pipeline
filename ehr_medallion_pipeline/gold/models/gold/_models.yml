@@ -59,3 +59,192 @@ models:
           - accepted_values:
               arguments:
                 values: ['Married', 'Single', 'Unknown']
+  
+  - name: encounter_summary
+    description: "One row per encounter × condition. Built from synthea_encounters LEFT JOIN synthea_conditions (on encounter_id) INNER JOIN synthea_patients (on patient_id). An encounter with multiple conditions appears once per condition; an encounter with no conditions appears once, with condition_code and condition_description NULL and has_condition FALSE. Encounters whose patient is missing from synthea_patients are excluded. WARNING: encounter-level values repeat across condition rows — count encounters with COUNT(DISTINCT encounter_id), and do not SUM or AVG encounter_cost or duration_minutes directly from this table."
+    columns:
+
+      # --- Identity ---
+      - name: encounter_id
+        description: "Encounter identifier. Passthrough from synthea_encounters.id. NOT unique in this table — repeats once per condition diagnosed during the encounter."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: source('silver', 'synthea_encounters')
+                field: id
+
+      - name: patient_id
+        description: "Patient identifier. Passthrough from synthea_encounters.patient_id. Always matches a synthea_patients.id, since encounters without a matching patient are excluded by the INNER JOIN."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: source('silver', 'synthea_patients')
+                field: id
+      
+      # --- Encounter facts (repeat across condition rows) ---
+      - name: encounter_start
+        description: "Encounter start timestamp (UTC). Passthrough from synthea_encounters.start."
+        tests:
+          - not_null
+
+      - name: encounter_end
+        description: "Encounter end timestamp (UTC). Passthrough from synthea_encounters.stop."
+        tests:
+          - not_null
+
+      - name: duration_minutes
+        description: "Encounter length in whole minutes, computed in Silver as (stop - start) / 60, truncated to integer. Encounter-level value — repeats on every condition row of the same encounter."
+        tests:
+          - not_null
+
+      - name: encounter_cost
+        description: "Total cost of the encounter in USD. Encounter-level value — repeats on every condition row of the same encounter, so de-duplicate by encounter_id before SUM or AVG."
+        config:
+          meta:
+            tech_debt: "DOUBLE in Silver — should be DecimalType (issue #27)"
+        tests:
+          - not_null
+
+      - name: encounter_class
+        description: "Type of visit. Passthrough from synthea_encounters.encounterclass. Values: wellness (preventive checkup), ambulatory (scheduled clinic visit), outpatient (same-day procedure), urgentcare (walk-in urgent care), emergency (ER visit), inpatient (hospital admission)."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['urgentcare', 'outpatient', 'inpatient', 'ambulatory', 'emergency', 'wellness']
+      # --- Condition columns (from synthea_conditions, LEFT JOINed) ---
+      - name: condition_code
+        description: "Diagnosis code (SNOMED CT) for one condition diagnosed during this encounter. Passthrough from synthea_conditions.condition_code. NULL when the encounter has no diagnosed conditions."
+
+      - name: condition_description
+        description: "Human-readable name of the diagnosis, e.g. 'Hypertension'. Passthrough from synthea_conditions.condition_description. NULL when the encounter has no diagnosed conditions. Use this column (case-insensitive match) when searching by condition name."
+
+      - name: has_condition
+        description: "Boolean. TRUE when this row carries a diagnosis (condition_code is not NULL); FALSE for encounters with no conditions. Filter has_condition = TRUE when counting diagnoses."
+        tests:
+          - not_null
+      # --- Patient attributes (from synthea_patients, INNER JOINed) ---
+      - name: patient_age
+        description: "Patient's CURRENT age in years as of the last Silver run — NOT age at the time of the encounter. Passthrough from synthea_patients.patient_age. Patient-level value — repeats on every row for the same patient."
+        tests:
+          - not_null
+
+      - name: gender
+        description: "Patient gender: 'M' or 'F'. Passthrough from synthea_patients.gender."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['M', 'F']
+
+      # --- Time grouping columns (derived in Silver from encounter_start, UTC) ---
+      - name: encounter_year
+        description: "Calendar year of encounter_start (UTC). Use for yearly trends."
+        tests:
+          - not_null
+
+      - name: encounter_month
+        description: "Calendar month of encounter_start (UTC), 1–12. Combine with encounter_year for monthly trends."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
+
+  - name: condition_prevalence
+    description: "One row per (condition_code, condition_description). Lifetime prevalence: share of ALL patients in synthea_patients ever diagnosed with the condition, including resolved conditions. Built from synthea_conditions grouped by code and description. KNOWN ISSUE: Synthea assigns code 427089005 to two different conditions (Diabetes from Cystic Fibrosis, Male Infertility), so that code appears on two rows; filter or group by condition_description, not condition_code alone."
+    columns:
+
+      - name: condition_code
+        description: "Diagnosis code (SNOMED CT). Not unique in this table — see the known issue in the table description."
+        tests:
+          - not_null
+
+      - name: condition_description
+        description: "Human-readable condition name, e.g. 'Hypertension'. Use this column (case-insensitive match) when searching by condition name."
+
+      - name: patient_count
+        description: "Number of distinct patients ever diagnosed with this condition."
+        tests:
+          - not_null
+
+      - name: total_patients
+        description: "Total patients in synthea_patients, including deceased patients and patients with no conditions. Same value on every row — the denominator for prevalence_pct."
+        tests:
+          - not_null
+
+      - name: prevalence_pct
+        description: "patient_count / total_patients × 100, rounded to 2 decimals. A PERCENTAGE on a 0–100 scale (12.5 means 12.5%), not a 0–1 fraction."
+        tests:
+          - not_null
+
+  - name: provider_metrics
+    description: "One row per provider. Lifetime encounter volume, patient reach, average visit length, and total cost per provider, aggregated directly from synthea_encounters (one row per encounter, so totals are not inflated). Includes encounters whose patient is missing from synthea_patients. Providers are identified only by an opaque Synthea ID — there is no provider name, specialty, or organization in this dataset. Encounters with no recorded provider (source data gap, ~0.3%) are grouped under provider_id = 'UNKNOWN'; exclude that row when ranking or comparing providers."
+    columns:
+
+      - name: provider_id
+        description: "Opaque Synthea provider identifier, or 'UNKNOWN' for encounters with no provider in the source data. No provider dimension exists, so names and specialties are unavailable."
+        tests:
+          - unique
+          - not_null
+
+      - name: total_encounters
+        description: "Number of encounters handled by this provider."
+        tests:
+          - not_null
+
+      - name: count_patients
+        description: "Number of distinct patients seen by this provider."
+        tests:
+          - not_null
+
+      - name: avg_duration_minutes
+        description: "Average encounter length in minutes, rounded to 2 decimals."
+        tests:
+          - not_null
+
+      - name: total_cost
+        description: "Sum of encounter cost in USD across all of this provider's encounters, rounded to 2 decimals."
+        config:
+          meta:
+            tech_debt: "Aggregated from DOUBLE in Silver — should be DecimalType (issue #27)"
+        tests:
+          - not_null
+
+  - name: readmission_risk
+    description: "One row per encounter. Flags whether the same patient had ANOTHER ENCOUNTER OF ANY TYPE starting within 30 calendar days of this encounter's start, using LEAD() over synthea_encounters ordered by start. This is NOT a clinical readmission rate: it does not restrict to inpatient stays, does not measure from discharge, and counts wellness and routine visits. About 45% of encounters are flagged. For clinical readmission questions, state this limitation. Includes encounters whose patient is missing from synthea_patients."
+    columns:
+
+      - name: encounter_id
+        description: "Encounter identifier. Passthrough from synthea_encounters.id. Unique in this table."
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: source('silver', 'synthea_encounters')
+                field: id
+
+      - name: patient_id
+        description: "Patient identifier. Passthrough from synthea_encounters.patient_id."
+        tests:
+          - not_null
+
+      - name: encounter_start
+        description: "Encounter start timestamp (UTC). Passthrough from synthea_encounters.start."
+        tests:
+          - not_null
+
+      - name: next_encounter_date
+        description: "Start timestamp (UTC) of the same patient's next encounter of any type. NULL for the patient's most recent encounter."
+
+      - name: days_to_next_encounter
+        description: "Calendar days between this encounter's start and the next encounter's start (DATEDIFF on dates, so same-day visits = 0). NULL for the patient's most recent encounter."
+
+      - name: is_readmission_risk
+        description: "TRUE when days_to_next_encounter <= 30, i.e. any return visit within 30 days. FALSE otherwise — including the patient's most recent encounter, where the next visit is unknown, not absent."
+        tests:
+          - not_null
