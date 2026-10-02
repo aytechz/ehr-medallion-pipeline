@@ -82,7 +82,8 @@ models:
               arguments:
                 to: source('silver', 'synthea_patients')
                 field: id
-            # --- Encounter facts (repeat across condition rows) ---
+      
+      # --- Encounter facts (repeat across condition rows) ---
       - name: encounter_start
         description: "Encounter start timestamp (UTC). Passthrough from synthea_encounters.start."
         tests:
@@ -152,3 +153,30 @@ models:
               arguments:
                 values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
                 quote: false
+
+  - name: condition_prevalence
+    description: "One row per (condition_code, condition_description). Lifetime prevalence: share of ALL patients in synthea_patients ever diagnosed with the condition, including resolved conditions. Built from synthea_conditions grouped by code and description. KNOWN ISSUE: Synthea assigns code 427089005 to two different conditions (Diabetes from Cystic Fibrosis, Male Infertility), so that code appears on two rows; filter or group by condition_description, not condition_code alone."
+    columns:
+
+      - name: condition_code
+        description: "Diagnosis code (SNOMED CT). Not unique in this table — see the known issue in the table description."
+        tests:
+          - not_null
+
+      - name: condition_description
+        description: "Human-readable condition name, e.g. 'Hypertension'. Use this column (case-insensitive match) when searching by condition name."
+
+      - name: patient_count
+        description: "Number of distinct patients ever diagnosed with this condition."
+        tests:
+          - not_null
+
+      - name: total_patients
+        description: "Total patients in synthea_patients, including deceased patients and patients with no conditions. Same value on every row — the denominator for prevalence_pct."
+        tests:
+          - not_null
+
+      - name: prevalence_pct
+        description: "patient_count / total_patients × 100, rounded to 2 decimals. A PERCENTAGE on a 0–100 scale (12.5 means 12.5%), not a 0–1 fraction."
+        tests:
+          - not_null
