@@ -213,3 +213,38 @@ models:
             tech_debt: "Aggregated from DOUBLE in Silver — should be DecimalType (issue #27)"
         tests:
           - not_null
+
+  - name: readmission_risk
+    description: "One row per encounter. Flags whether the same patient had ANOTHER ENCOUNTER OF ANY TYPE starting within 30 calendar days of this encounter's start, using LEAD() over synthea_encounters ordered by start. This is NOT a clinical readmission rate: it does not restrict to inpatient stays, does not measure from discharge, and counts wellness and routine visits. About 45% of encounters are flagged. For clinical readmission questions, state this limitation. Includes encounters whose patient is missing from synthea_patients."
+    columns:
+
+      - name: encounter_id
+        description: "Encounter identifier. Passthrough from synthea_encounters.id. Unique in this table."
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: source('silver', 'synthea_encounters')
+                field: id
+
+      - name: patient_id
+        description: "Patient identifier. Passthrough from synthea_encounters.patient_id."
+        tests:
+          - not_null
+
+      - name: encounter_start
+        description: "Encounter start timestamp (UTC). Passthrough from synthea_encounters.start."
+        tests:
+          - not_null
+
+      - name: next_encounter_date
+        description: "Start timestamp (UTC) of the same patient's next encounter of any type. NULL for the patient's most recent encounter."
+
+      - name: days_to_next_encounter
+        description: "Calendar days between this encounter's start and the next encounter's start (DATEDIFF on dates, so same-day visits = 0). NULL for the patient's most recent encounter."
+
+      - name: is_readmission_risk
+        description: "TRUE when days_to_next_encounter <= 30, i.e. any return visit within 30 days. FALSE otherwise — including the patient's most recent encounter, where the next visit is unknown, not absent."
+        tests:
+          - not_null
