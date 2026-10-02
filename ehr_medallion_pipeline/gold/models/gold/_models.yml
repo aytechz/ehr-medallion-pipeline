@@ -64,7 +64,7 @@ models:
     description: "One row per encounter × condition. Built from synthea_encounters LEFT JOIN synthea_conditions (on encounter_id) INNER JOIN synthea_patients (on patient_id). An encounter with multiple conditions appears once per condition; an encounter with no conditions appears once, with condition_code and condition_description NULL and has_condition FALSE. Encounters whose patient is missing from synthea_patients are excluded. WARNING: encounter-level values repeat across condition rows — count encounters with COUNT(DISTINCT encounter_id), and do not SUM or AVG encounter_cost or duration_minutes directly from this table."
     columns:
 
-    # --- Identity ---
+      # --- Identity ---
       - name: encounter_id
         description: "Encounter identifier. Passthrough from synthea_encounters.id. NOT unique in this table — repeats once per condition diagnosed during the encounter."
         tests:
@@ -82,3 +82,34 @@ models:
               arguments:
                 to: source('silver', 'synthea_patients')
                 field: id
+            # --- Encounter facts (repeat across condition rows) ---
+      - name: encounter_start
+        description: "Encounter start timestamp (UTC). Passthrough from synthea_encounters.start."
+        tests:
+          - not_null
+
+      - name: encounter_end
+        description: "Encounter end timestamp (UTC). Passthrough from synthea_encounters.stop."
+        tests:
+          - not_null
+
+      - name: duration_minutes
+        description: "Encounter length in whole minutes, computed in Silver as (stop - start) / 60, truncated to integer. Encounter-level value — repeats on every condition row of the same encounter."
+        tests:
+          - not_null
+
+      - name: encounter_cost
+        description: "Total cost of the encounter in USD. Encounter-level value — repeats on every condition row of the same encounter, so de-duplicate by encounter_id before SUM or AVG."
+        config:
+          meta:
+            tech_debt: "DOUBLE in Silver — should be DecimalType (issue #27)"
+        tests:
+          - not_null
+
+      - name: encounter_class
+        description: "Type of visit. Passthrough from synthea_encounters.encounterclass. Values: wellness (preventive checkup), ambulatory (scheduled clinic visit), outpatient (same-day procedure), urgentcare (walk-in urgent care), emergency (ER visit), inpatient (hospital admission)."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['urgentcare', 'outpatient', 'inpatient', 'ambulatory', 'emergency', 'wellness']
