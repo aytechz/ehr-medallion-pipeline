@@ -113,3 +113,14 @@ models:
           - accepted_values:
               arguments:
                 values: ['urgentcare', 'outpatient', 'inpatient', 'ambulatory', 'emergency', 'wellness']
+      # --- Condition columns (from synthea_conditions, LEFT JOINed) ---
+      - name: condition_code
+        description: "Diagnosis code (SNOMED CT) for one condition diagnosed during this encounter. Passthrough from synthea_conditions.condition_code. NULL when the encounter has no diagnosed conditions."
+
+      - name: condition_description
+        description: "Human-readable name of the diagnosis, e.g. 'Hypertension'. Passthrough from synthea_conditions.condition_description. NULL when the encounter has no diagnosed conditions. Use this column (case-insensitive match) when searching by condition name."
+
+      - name: has_condition
+        description: "Boolean. TRUE when this row carries a diagnosis (condition_code is not NULL); FALSE for encounters with no conditions. Filter has_condition = TRUE when counting diagnoses."
+        tests:
+          - not_null
