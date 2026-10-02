@@ -180,3 +180,36 @@ models:
         description: "patient_count / total_patients × 100, rounded to 2 decimals. A PERCENTAGE on a 0–100 scale (12.5 means 12.5%), not a 0–1 fraction."
         tests:
           - not_null
+
+  - name: provider_metrics
+    description: "One row per provider. Lifetime encounter volume, patient reach, average visit length, and total cost per provider, aggregated directly from synthea_encounters (one row per encounter, so totals are not inflated). Includes encounters whose patient is missing from synthea_patients. Providers are identified only by an opaque Synthea ID — there is no provider name, specialty, or organization in this dataset. Encounters with no recorded provider (source data gap, ~0.3%) are grouped under provider_id = 'UNKNOWN'; exclude that row when ranking or comparing providers."
+    columns:
+
+      - name: provider_id
+        description: "Opaque Synthea provider identifier, or 'UNKNOWN' for encounters with no provider in the source data. No provider dimension exists, so names and specialties are unavailable."
+        tests:
+          - unique
+          - not_null
+
+      - name: total_encounters
+        description: "Number of encounters handled by this provider."
+        tests:
+          - not_null
+
+      - name: count_patients
+        description: "Number of distinct patients seen by this provider."
+        tests:
+          - not_null
+
+      - name: avg_duration_minutes
+        description: "Average encounter length in minutes, rounded to 2 decimals."
+        tests:
+          - not_null
+
+      - name: total_cost
+        description: "Sum of encounter cost in USD across all of this provider's encounters, rounded to 2 decimals."
+        config:
+          meta:
+            tech_debt: "Aggregated from DOUBLE in Silver — should be DecimalType (issue #27)"
+        tests:
+          - not_null
